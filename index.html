@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sky Blue Enterprises | Courier Label Sorter</title>
+<style>
+:root{--navy:#102a43;--blue:#1769aa;--cyan:#21a0c4;--bg:#f3f7fb;--ink:#172b4d;--muted:#62748a}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);font-family:Inter,system-ui,Arial,sans-serif;color:var(--ink)}
+header{background:linear-gradient(120deg,#102a43,#1769aa);color:#fff;padding:26px 18px}
+.wrap{max-width:900px;margin:auto}header .brand{font-size:13px;letter-spacing:1.7px;text-transform:uppercase;opacity:.85}h1{margin:8px 0 6px;font-size:clamp(25px,5vw,38px)}header p{margin:0;color:#d9e8f5}
+main{padding:24px 16px}.panel{background:#fff;border:1px solid #e0e8f0;border-radius:18px;padding:22px;box-shadow:0 8px 28px #102a4310}
+.drop{border:2px dashed #9bb8d0;border-radius:14px;padding:32px 16px;text-align:center;background:#f8fbfe;cursor:pointer}
+.drop strong{display:block;font-size:18px;margin:8px}.drop small{color:var(--muted)}input[type=file]{display:none}
+button,.pick{border:0;border-radius:10px;background:var(--blue);color:#fff;padding:12px 18px;font-weight:700;cursor:pointer}
+button:disabled{opacity:.45;cursor:not-allowed}.pick{display:inline-block;margin-top:14px}
+.actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:18px}.status{margin:16px 0 0;color:var(--muted);font-size:14px}
+.results{margin-top:20px;display:grid;gap:10px}.item{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid #e2eaf2;border-radius:12px;padding:14px;background:#fff}.item b{display:block}.item small{color:var(--muted)}
+.note{font-size:13px;line-height:1.6;color:var(--muted);margin-top:18px}.foot{text-align:center;color:#8090a3;font-size:12px;padding:24px}
+</style>
+</head>
+<body>
+<header><div class="wrap"><div class="brand">Sky Blue Enterprises</div><h1>Courier Label Sorter</h1><p>Upload a shipping-label PDF and download separate PDFs courier-wise.</p></div></header>
+<main class="wrap"><section class="panel">
+<label class="drop" for="file"><div style="font-size:34px">📄</div><strong>Choose your shipping-label PDF</strong><small>Best results when each shipping label is on a separate PDF page.</small><span class="pick">Select PDF</span></label>
+<input id="file" type="file" accept="application/pdf">
+<div class="actions"><button id="process" disabled>Sort by Courier</button><button id="reset" style="background:#e8eef5;color:#29445f">Reset</button></div>
+<div id="status" class="status">No file selected.</div><div id="results" class="results"></div>
+<p class="note"><b>Privacy:</b> Processing runs in your browser; the selected PDF is not uploaded to a server. This first version identifies courier names from readable PDF text and groups whole pages. Scanned/image-only PDFs and multiple labels printed on one page may need OCR and label-cropping support in a later update.</p>
+</section></main><div class="foot">© Sky Blue Enterprises · Courier Label Sorter</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script>
+const fileInput=document.getElementById('file'),processBtn=document.getElementById('process'),statusEl=document.getElementById('status'),resultsEl=document.getElementById('results');
+let selectedFile=null;
+pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const courierRules=[
+['XpressBees',/xpress\s*bees|xpressbees/i],['Delhivery',/delhivery/i],['Blue Dart',/blue\s*dart|bluedart/i],
+['Ecom Express',/ecom\s*express|ecomexpress/i],['Ekart',/ekart/i],['Shadowfax',/shadow\s*fax|shadowfax/i],
+['DTDC',/\bdtdc\b/i],['India Post',/india\s*post|speed\s*post/i],['Amazon Shipping',/amazon\s*shipping|amazon transportation/i],
+['Shiprocket',/shiprocket/i],['Other / Unknown',/.*/]
+];
+fileInput.addEventListener('change',()=>{selectedFile=fileInput.files[0]||null;processBtn.disabled=!selectedFile;resultsEl.innerHTML='';statusEl.textContent=selectedFile?selectedFile.name+' selected.':'No file selected.'});
+document.getElementById('reset').addEventListener('click',()=>{fileInput.value='';selectedFile=null;processBtn.disabled=true;resultsEl.innerHTML='';statusEl.textContent='No file selected.'});
+function detectCourier(text){for(const [name,re] of courierRules){if(name==='Other / Unknown')return name;if(re.test(text))return name;}return 'Other / Unknown';}
+processBtn.addEventListener('click',async()=>{
+ if(!selectedFile)return;
+ processBtn.disabled=true;resultsEl.innerHTML='';
+ try{
+  statusEl.textContent='Reading PDF pages…';
+  const bytes=await selectedFile.arrayBuffer();
+  const pdf=await pdfjsLib.getDocument({data:bytes}).promise;
+  const groups=new Map();
+  for(let i=1;i<=pdf.numPages;i++){
+   statusEl.textContent='Checking page '+i+' of '+pdf.numPages+'…';
+   const page=await pdf.getPage(i),content=await page.getTextContent();
+   const text=content.items.map(x=>x.str).join(' ');
+   const courier=detectCourier(text);
+   if(!groups.has(courier))groups.set(courier,[]);
+   groups.get(courier).push(i-1);
+  }
+  statusEl.textContent='Creating courier-wise PDFs…';
+  const source=await PDFLib.PDFDocument.load(bytes);
+  for(const [name,indices] of groups){
+   const out=await PDFLib.PDFDocument.create();
+   const copied=await out.copyPages(source,indices);
+   copied.forEach(p=>out.addPage(p));
+   const blob=new Blob([await out.save()],{type:'application/pdf'});
+   const url=URL.createObjectURL(blob);
+   const row=document.createElement('div');row.className='item';
+   const info=document.createElement('div');info.innerHTML='<b></b><small></small>';
+   info.querySelector('b').textContent=name;
+   info.querySelector('small').textContent=indices.length+' page(s)';
+   const a=document.createElement('a');a.href=url;a.download=name.toLowerCase().replace(/[^a-z0-9]+/g,'-')+'.pdf';a.textContent='Download PDF';a.className='pick';a.style.margin='0';a.style.textDecoration='none';
+   row.append(info,a);resultsEl.append(row);
+  }
+  statusEl.textContent='Done! '+groups.size+' courier group(s) found across '+pdf.numPages+' page(s).';
+ }catch(err){console.error(err);statusEl.textContent='Could not process this PDF. Please try a valid, non-password-protected PDF.';}
+ finally{processBtn.disabled=!selectedFile;}
+});
+</script></body></html>
